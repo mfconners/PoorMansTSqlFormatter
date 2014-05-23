@@ -32,6 +32,9 @@ using PoorMansTSqlFormatterPluginShared;
 
 namespace PoorMansTSqlFormatterSSMSAddIn
 {
+	using System.Linq;
+	using System.Text.RegularExpressions;
+
 	/// <summary>This is the class that will be instantiated by the VS environment to load the add-in.</summary>
 	public class AddinConnector : IDTExtensibility2, IDTCommandTarget
 	{
@@ -316,7 +319,7 @@ namespace PoorMansTSqlFormatterSSMSAddIn
 
                         string textToFormat = formatSelectionOnly ? selectionText : fullText;
                         bool errorsFound = false;
-                        string formattedText = _formattingManager.Format(textToFormat, ref errorsFound);
+                        string formattedText = _formattingManager.Format(ReplaceParameterPlaceholders(textToFormat), ref errorsFound);
 
                         bool abortFormatting = false;
                         if (errorsFound)
@@ -406,13 +409,38 @@ namespace PoorMansTSqlFormatterSSMSAddIn
             return outText;
         }
 
+		private static string ReplaceParameterPlaceholders(string sql)
+		{
+			var paramsRegex = new Regex("@p[0-9]+");
+			var paramNames = paramsRegex.Matches(sql).Cast<Match>().Select(x => x.Value).Distinct().ToArray();
+			var paramsAssignmentsRegex = new Regex("(@p[0-9]+) = (.*?)](,)?");
+			var paramsAssignments = paramsAssignmentsRegex.Matches(sql).Cast<Match>().Select(x => x.Value).Distinct().ToArray();
+			foreach (var paramName in paramNames.Reverse().ToArray())
+			{
+				string name = paramName;
+				var assignment = paramsAssignments.First(x => x.StartsWith(name));
+				var paramValue = assignment.Substring(assignment.IndexOf('=') + 2, assignment.Length - assignment.IndexOf('=') - 2 - (assignment.Length - assignment.LastIndexOf('['))).Trim();
+				sql = sql.Replace(assignment, String.Empty);
+				if (paramValue == "False")
+				{
+					paramValue = "0";
+				}
+				else if (paramValue == "True")
+				{
+					paramValue = "1";
+				}
+				sql = sql.Replace(paramName, paramValue);
+			}
+			return sql;
+		}
+
         private static void ReplaceAllCodeInDocument(Document targetDoc, string newText)
         {
             TextDocument textDoc = targetDoc.Object("TextDocument") as TextDocument;
             if (textDoc != null)
             {
                 textDoc.StartPoint.CreateEditPoint().Delete(textDoc.EndPoint);
-                textDoc.StartPoint.CreateEditPoint().Insert(newText);
+								textDoc.StartPoint.CreateEditPoint().Insert(newText);
             }
         }
     }
